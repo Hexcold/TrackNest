@@ -1,0 +1,17 @@
+{
+  "downloads_simultaneos": 3,
+  "qualidade_audio": "0",
+  "max_tentativas": 3,
+  "pasta_raiz": "Musicas",
+  "pasta_desconhecidas": "Desconhecidas",
+  "arquivo_lista": "musicas.json",
+  "pular_se_existir": true,
+  "usar_archive": true,
+
+  "cookies_from_browser": null,
+  "cookies_file": null,
+
+  "timeout_segundos": 600,
+  "embed_thumbnail": true,
+  "salvar_info_json": false
+}
