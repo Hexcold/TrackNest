@@ -38,13 +38,14 @@ O suporte ao Spotify é apenas para leitura de metadados. O script não baixa á
 - Suporte a playlists inteiras do YouTube.
 - Suporte a links do TikTok.
 - Suporte a links do Instagram.
-- Suporte parcial a links do Kwai.
+- Suporte parcial a links do Kwai, com extração alternativa via JSON-LD da própria página quando o `yt-dlp` não tem extrator dedicado.
 - Suporte parcial a links do Facebook.
 - Leitura de metadados de playlists/faixas do Spotify.
 - Organização automática por artista ou plataforma.
 - Detecção de autor e título via metadados do `yt-dlp`.
 - Ignora placeholders como `[NOME DO AUTOR]` e `[NOME DA MUSICA]`.
-- Expansão de URLs curtas, como `vt.tiktok.com`.
+- Expansão de URLs curtas, como `vt.tiktok.com`, links `/share/` do Facebook e páginas do Kwai (`kwai-video.com`).
+- Geração de `musicas.json` a partir de uma exportação de conversa (WhatsApp), via `parse_links_to_json.py`.
 - Tratamento de falhas por categoria.
 - Relatório de falhas em `.json` e `.txt`.
 - Controle de downloads já realizados com `baixados_archive.txt`.
@@ -57,6 +58,7 @@ O suporte ao Spotify é apenas para leitura de metadados. O script não baixa á
 ```text
 tracknest/
 ├── baixar_musicas.py
+├── parse_links_to_json.py
 ├── musicas.exemplo.json
 ├── musicas.json
 ├── config.json
@@ -77,6 +79,7 @@ pelo script e ficam fora do controle de versão (`.gitignore`). Só
 | Arquivo | Descrição |
 |---|---|
 | `baixar_musicas.py` | Script principal |
+| `parse_links_to_json.py` | Extrai links de uma exportação de conversa e adiciona em `musicas.json` |
 | `musicas.exemplo.json` | Modelo versionado para criar seu `musicas.json` |
 | `musicas.json` | Lista de links para processar (pessoal, não versionado) |
 | `config.json` | Configurações opcionais |
@@ -273,6 +276,29 @@ Mesmo assim, o script já tenta ignorar esses valores automaticamente.
 
 ---
 
+## 🔗 Gerando `musicas.json` a partir de mensagens
+
+Se você recebe links de música espalhados em conversas (por exemplo, uma exportação de conversa do WhatsApp), pode usar o script `parse_links_to_json.py` para extrair os links automaticamente e adicioná-los ao `musicas.json`, em vez de copiar cada um manualmente.
+
+Exemplo de uso:
+
+```bash
+python3 parse_links_to_json.py mensagens.txt --json musicas.json
+```
+
+O script reconhece linhas no formato `[DD/MM, HH:MM] Nome: mensagem` (exportação padrão do WhatsApp) para associar cada link à data, hora e remetente da mensagem. Linhas fora desse formato ainda têm seus links extraídos normalmente.
+
+Cada link encontrado vira uma entrada no `musicas.json`, com:
+
+- `plataforma` detectada automaticamente pelo domínio (`youtube`, `kwai` ou `other`);
+- `autor` e `titulo` preenchidos com os placeholders `[NOME DO AUTOR]` / `[NOME DA MUSICA]`, que o `baixar_musicas.py` substitui pelos metadados reais do `yt-dlp` na hora do download.
+
+Links cuja URL já existir no `musicas.json` não são adicionados de novo.
+
+> ⚠️ O arquivo de conversa usado como entrada costuma conter dados pessoais (nomes de contatos, mensagens). Assim como o `musicas.json`, ele não deve ser versionado — mantenha-o fora do `git` (ou adicione ao `.gitignore`).
+
+---
+
 ## ▶️ Como executar
 
 No terminal, entre na pasta do projeto:
@@ -428,6 +454,8 @@ Essas plataformas são tratadas por um adaptador genérico baseado no `yt-dlp`.
 }
 ```
 
+O `yt-dlp` não tem extrator dedicado para o Kwai e cairia no genérico, que costuma falhar. Como alternativa, o script lê o bloco JSON-LD (`schema.org VideoObject`) embutido na própria página do Kwai para obter a URL direta do vídeo, o autor e o título/legenda, evitando o fallback `kwai_sem_extrator_oficial_ou_url_incompativel` sempre que a página expõe esses dados.
+
 ### Facebook
 
 ```json
@@ -464,6 +492,7 @@ bloqueio_403_ou_cookies
 video_nao_encontrado
 video_indisponivel
 kwai_sem_extrator_oficial_ou_url_incompativel
+sem_extrator_dedicado_para_o_site
 falha_no_ffmpeg_ou_pos_processamento
 arquivo_nao_gerado_apesar_de_sucesso_relatado
 erro_desconhecido

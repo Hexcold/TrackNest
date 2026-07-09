@@ -224,3 +224,7 @@ __marimo__/
 /nomes_arquivos.json
 /relatorio_falhas.json
 /relatorio_falhas.txt
+
+# TrackNest - exportações de conversa usadas como entrada do parse_links_to_json.py
+/mensagens_exemplo.txt
+/mensagens*.txt

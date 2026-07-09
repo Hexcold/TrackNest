@@ -32,7 +32,8 @@ CONFIG_PADRAO = {
     "cookies_from_browser": None,
     "cookies_file": None,
 
-    # Tenta expandir links curtos como vt.tiktok.com e links share do Facebook.
+    # Tenta expandir links curtos como vt.tiktok.com, links share do
+    # Facebook e páginas curtas do Kwai (kwai-video.com).
     "expandir_urls_curtas": True,
 
     # Spotify é usado apenas para ler metadados.
@@ -292,6 +293,9 @@ def deve_tentar_expandir_url(url):
     if "facebook.com" in dominio and "/share/" in caminho:
         return True
 
+    if "kwai-video.com" in dominio:
+        return True
+
     return False
 
 
@@ -328,6 +332,67 @@ def expandir_url_curta(url):
         pass
 
     return url
+
+
+def extrair_video_direto_kwai(url):
+    """
+    O yt-dlp não tem extrator dedicado para o Kwai, então cai no genérico
+    e falha. A própria página do Kwai, porém, embute um bloco JSON-LD
+    (schema.org VideoObject, id="VideoObject") com a URL direta do mp4,
+    autor e legenda — usa isso como alternativa.
+
+    Retorna None se não conseguir extrair (a chamada segue o fluxo normal).
+    """
+    if not url:
+        return None
+
+    try:
+        req = urllib.request.Request(
+            url,
+            headers={
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/120.0 Safari/537.36"
+                )
+            }
+        )
+
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            html = resp.read().decode("utf-8", errors="ignore")
+
+        match = re.search(
+            r'<script[^>]*id="VideoObject"[^>]*>(.*?)</script>',
+            html,
+            re.S
+        )
+
+        if not match:
+            return None
+
+        dados = json.loads(match.group(1))
+        url_direta = dados.get("contentUrl")
+
+        if not url_direta:
+            return None
+
+        autor = (
+            (dados.get("audio") or {}).get("author")
+            or ((dados.get("creator") or {}).get("mainEntity") or {}).get("name")
+        )
+
+        legenda = re.sub(r"#\S+", "", dados.get("name") or "")
+        legenda = re.sub(r"\s+", " ", legenda).strip(" .")
+        titulo = legenda or (dados.get("audio") or {}).get("name")
+
+        return {
+            "url_direta": url_direta,
+            "autor": obter_valor_real(autor),
+            "titulo": obter_valor_real(titulo)
+        }
+
+    except Exception:
+        return None
 
 
 # ============================================================
@@ -575,6 +640,11 @@ def classificar_erro(stderr, plataforma=None, timeout=False):
             return "kwai_sem_extrator_oficial_ou_url_incompativel"
         return "url_nao_suportada"
 
+    if "falling back on generic information extractor" in erro:
+        if plataforma == "kwai":
+            return "kwai_sem_extrator_oficial_ou_url_incompativel"
+        return "sem_extrator_dedicado_para_o_site"
+
     if "private" in erro or "login" in erro or "sign in" in erro or "cookies" in erro or "cookie" in erro:
         return "precisa_de_login_ou_cookies"
 
@@ -648,7 +718,14 @@ class AdaptadorYtdlpBase(AdaptadorBase):
                 log(f"   De:   {url}")
                 log(f"   Para: {url_expandida}")
 
-            return url_expandida
+            url = url_expandida
+
+        if "kwai.com" in urlparse(url).netloc.lower():
+            dados_kwai = extrair_video_direto_kwai(url)
+
+            if dados_kwai and dados_kwai.get("url_direta"):
+                log("🎯 URL direta do vídeo do Kwai encontrada (sem extrator dedicado no yt-dlp).")
+                return dados_kwai["url_direta"]
 
         return url
 
@@ -995,6 +1072,7 @@ class AdaptadorYtdlpBase(AdaptadorBase):
                     "bloqueio_403_ou_cookies",
                     "url_nao_suportada",
                     "kwai_sem_extrator_oficial_ou_url_incompativel",
+                    "sem_extrator_dedicado_para_o_site",
                     "video_nao_encontrado",
                     "video_indisponivel"
                 }:
@@ -1074,8 +1152,43 @@ class AdaptadorGenericoYtdlp(AdaptadorYtdlpBase):
         plataforma = normalizar_plataforma_item(item)
         return plataforma in self.plataformas
 
+    def resolver_item_kwai(self, item):
+        """
+        Kwai não tem extrator dedicado no yt-dlp (baixar_com_ytdlp/
+        preparar_url já trocam a URL da página pela URL direta do mp4).
+        Aqui só complementa autor/título com os dados do JSON-LD da
+        página quando o item não já os tem, para não cair em
+        "Kwai/Desconhecidas/<hash da CDN>.mp3". A URL do item não é
+        tocada: continua sendo a URL original, usada para dedup/relatório.
+        """
+        if obter_valor_real(item.get("autor")) and obter_valor_real(item.get("titulo")):
+            return item
+
+        url_pagina = item.get("url")
+
+        if self.config.get("expandir_urls_curtas") and deve_tentar_expandir_url(url_pagina):
+            url_pagina = expandir_url_curta(url_pagina)
+
+        dados = extrair_video_direto_kwai(url_pagina)
+
+        if not dados:
+            return item
+
+        item = item.copy()
+
+        if not obter_valor_real(item.get("autor")) and dados["autor"]:
+            item["autor"] = dados["autor"]
+
+        if not obter_valor_real(item.get("titulo")) and dados["titulo"]:
+            item["titulo"] = dados["titulo"]
+
+        return item
+
     def processar(self, item, indice, total):
         plataforma = normalizar_plataforma_item(item)
+
+        if plataforma == "kwai":
+            item = self.resolver_item_kwai(item)
 
         return self.baixar_com_ytdlp(
             item=item,
@@ -1457,6 +1570,12 @@ def mostrar_dicas(resultados):
     if any(f.get("plataforma") == "kwai" for f in falhas):
         log("\n💡 Kwai nem sempre é suportado pelo yt-dlp.")
         log("   Alguns links funcionam e outros não, dependendo do formato do link.")
+
+    if any(f.get("categoria") == "sem_extrator_dedicado_para_o_site" for f in falhas):
+        log("\n💡 O yt-dlp não tem extrator dedicado para esse site e caiu no")
+        log("   extrator genérico, que não conseguiu achar a mídia na página.")
+        log("   Verifique se o link aponta direto para o vídeo (não uma página")
+        log("   intermediária) ou se o site precisa de outro método de download.")
 
     if any(f.get("categoria") == "erro_spotify" for f in falhas):
         log("\n💡 Para Spotify, confira spotify_client_id e spotify_client_secret no config.json.")

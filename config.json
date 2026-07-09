@@ -8,7 +8,7 @@
   "pular_se_existir": true,
   "usar_archive": true,
 
-  "cookies_from_browser": null,
+  "cookies_from_browser": "chrome",
   "cookies_file": null,
 
   "timeout_segundos": 600,
