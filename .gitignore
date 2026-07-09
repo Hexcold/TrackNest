@@ -216,3 +216,10 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# TrackNest - saída gerada pelo baixar_musicas.py
+/Musicas/
+/baixados_archive.txt
+/nomes_arquivos.json
+/relatorio_falhas.json
+/relatorio_falhas.txt

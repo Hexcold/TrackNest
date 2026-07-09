@@ -61,6 +61,7 @@ tracknest/
 ├── config.json
 ├── Musicas/
 ├── baixados_archive.txt
+├── nomes_arquivos.json
 ├── relatorio_falhas.json
 └── relatorio_falhas.txt
 ```
@@ -74,6 +75,7 @@ tracknest/
 | `config.json` | Configurações opcionais |
 | `Musicas/` | Pasta onde os arquivos MP3 são salvos |
 | `baixados_archive.txt` | Histórico usado para evitar baixar o mesmo item novamente |
+| `nomes_arquivos.json` | Reserva de nomes de arquivo por URL, para não misturar vídeos diferentes com o mesmo nome (ex: "som original" do TikTok) |
 | `relatorio_falhas.json` | Relatório detalhado das falhas |
 | `relatorio_falhas.txt` | Relatório legível das falhas |
 
@@ -448,6 +450,7 @@ video_nao_encontrado
 video_indisponivel
 kwai_sem_extrator_oficial_ou_url_incompativel
 falha_no_ffmpeg_ou_pos_processamento
+arquivo_nao_gerado_apesar_de_sucesso_relatado
 erro_desconhecido
 ```
 
@@ -462,6 +465,13 @@ baixados_archive.txt
 ```
 
 Ele registra os itens já baixados para evitar repetir downloads.
+
+Se o script detectar que um item consta como já baixado no
+`baixados_archive.txt` mas o `.mp3` correspondente não existe na pasta
+`Musicas/` (por exemplo, porque uma execução anterior foi interrompida
+depois do download mas antes da conversão), ele remove esse item do
+archive automaticamente e baixa de novo, em vez de reportar sucesso
+sem gerar o arquivo.
 
 Se quiser forçar tudo novamente, apague:
 
@@ -490,6 +500,7 @@ No Windows:
 ```bat
 rmdir /s /q Musicas
 del baixados_archive.txt
+del nomes_arquivos.json
 del relatorio_falhas.json
 del relatorio_falhas.txt
 ```
@@ -498,7 +509,7 @@ No Linux/macOS:
 
 ```bash
 rm -rf Musicas
-rm -f baixados_archive.txt relatorio_falhas.json relatorio_falhas.txt
+rm -f baixados_archive.txt nomes_arquivos.json relatorio_falhas.json relatorio_falhas.txt
 ```
 
 ---

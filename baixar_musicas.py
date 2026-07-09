@@ -45,8 +45,17 @@ ARQUIVO_CONFIG = "config.json"
 ARQUIVO_RELATORIO_JSON = "relatorio_falhas.json"
 ARQUIVO_RELATORIO_TXT = "relatorio_falhas.txt"
 ARQUIVO_ARCHIVE = "baixados_archive.txt"
+ARQUIVO_MAPA_NOMES = "nomes_arquivos.json"
+
+mapa_nomes = {}
 
 print_lock = Lock()
+nome_lock = Lock()
+archive_lock = Lock()
+
+RE_JA_NO_ARCHIVE = re.compile(
+    r"\[download\]\s+([^\s:]+):\s+has already been recorded in the archive"
+)
 
 
 # ============================================================
@@ -374,6 +383,85 @@ def remover_duplicadas(itens):
     return itens_unicos
 
 
+def carregar_mapa_nomes():
+    global mapa_nomes
+
+    if not os.path.exists(ARQUIVO_MAPA_NOMES):
+        mapa_nomes = {}
+        return
+
+    try:
+        with open(ARQUIVO_MAPA_NOMES, "r", encoding="utf-8") as f:
+            mapa_nomes = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        mapa_nomes = {}
+
+
+def salvar_mapa_nomes():
+    with open(ARQUIVO_MAPA_NOMES, "w", encoding="utf-8") as f:
+        json.dump(mapa_nomes, f, ensure_ascii=False, indent=2)
+
+
+def reservar_caminho_unico(caminho_mp3, url_normalizada):
+    """
+    Evita que vídeos de origens diferentes acabem com o mesmo nome de
+    arquivo (ex: mesmo autor + título genérico "som original" do TikTok).
+
+    Se o caminho já pertence a outra URL, adiciona um sufixo " (2)",
+    " (3)"... A reserva é persistida em nomes_arquivos.json, então vale
+    também entre execuções, não só dentro da mesma rodada.
+    """
+    pasta, nome_completo = os.path.split(caminho_mp3)
+    nome, ext = os.path.splitext(nome_completo)
+
+    with nome_lock:
+        candidato = caminho_mp3
+        contador = 2
+
+        while True:
+            dono = mapa_nomes.get(candidato)
+
+            if dono is None or dono == url_normalizada:
+                mapa_nomes[candidato] = url_normalizada
+                salvar_mapa_nomes()
+                return candidato
+
+            candidato = os.path.join(pasta, f"{nome} ({contador}){ext}")
+            contador += 1
+
+
+def remover_id_do_archive(video_id):
+    """
+    Remove um ID do arquivo de archive do yt-dlp.
+
+    Usado quando o yt-dlp reporta "has already been recorded in the
+    archive" (retorna sucesso, sem baixar nada) mas o .mp3 final não
+    existe no disco: o item ficou marcado como baixado numa execução
+    anterior que não chegou a gerar o arquivo (ex: pós-processamento
+    interrompido). Sem remover a marca, o item ficaria "com sucesso"
+    para sempre sem nunca ser baixado de verdade.
+    """
+    if not video_id or not os.path.exists(ARQUIVO_ARCHIVE):
+        return False
+
+    with archive_lock:
+        with open(ARQUIVO_ARCHIVE, "r", encoding="utf-8") as f:
+            linhas = f.readlines()
+
+        linhas_mantidas = [
+            linha for linha in linhas
+            if linha.strip().split(" ")[-1] != video_id
+        ]
+
+        if len(linhas_mantidas) == len(linhas):
+            return False
+
+        with open(ARQUIVO_ARCHIVE, "w", encoding="utf-8") as f:
+            f.writelines(linhas_mantidas)
+
+        return True
+
+
 # ============================================================
 # FERRAMENTAS
 # ============================================================
@@ -478,6 +566,9 @@ def classificar_erro(stderr, plataforma=None, timeout=False):
 
     if timeout:
         return "timeout"
+
+    if "arquivo final não foi gerado" in erro:
+        return "arquivo_nao_gerado_apesar_de_sucesso_relatado"
 
     if "unsupported url" in erro:
         if plataforma == "kwai":
@@ -653,8 +744,13 @@ class AdaptadorYtdlpBase(AdaptadorBase):
             "--retries", "10",
             "--fragment-retries", "10",
             "--socket-timeout", "30",
-            "--continue",
-            "--no-overwrites",
+            # Força novo download em cada tentativa. As várias "estrategias"
+            # de fallback usam o mesmo nome_saida; sem isso, o yt-dlp via
+            # --continue/--no-overwrites reaproveitava um arquivo bruto
+            # deixado por uma tentativa anterior (às vezes sem trilha de
+            # áudio) em vez de baixar de novo, causando falha permanente em
+            # "unable to obtain file audio codec with ffprobe".
+            "--force-overwrites",
             "-o", nome_saida
         ]
 
@@ -714,6 +810,7 @@ class AdaptadorYtdlpBase(AdaptadorBase):
 
         else:
             arquivo_mp3 = None
+            url_normalizada = normalizar_url_para_deduplicar(url_original)
 
             # Caso 1: tem autor e título
             if autor and titulo:
@@ -725,7 +822,8 @@ class AdaptadorYtdlpBase(AdaptadorBase):
 
                 nome_base = sanitizar_nome(f"{autor_limpo} - {titulo_limpo}")
                 arquivo_mp3 = os.path.join(pasta_destino, f"{nome_base}.mp3")
-                nome_saida = os.path.join(pasta_destino, f"{nome_base}.%(ext)s")
+                arquivo_mp3 = reservar_caminho_unico(arquivo_mp3, url_normalizada)
+                nome_saida = os.path.splitext(arquivo_mp3)[0] + ".%(ext)s"
                 descricao = f"{autor} - {titulo}"
 
             # Caso 2: tem somente título
@@ -741,7 +839,8 @@ class AdaptadorYtdlpBase(AdaptadorBase):
 
                 nome_base = titulo_limpo
                 arquivo_mp3 = os.path.join(pasta_destino, f"{nome_base}.mp3")
-                nome_saida = os.path.join(pasta_destino, f"{nome_base}.%(ext)s")
+                arquivo_mp3 = reservar_caminho_unico(arquivo_mp3, url_normalizada)
+                nome_saida = os.path.splitext(arquivo_mp3)[0] + ".%(ext)s"
                 descricao = titulo
 
             # Caso 3: tem somente autor
@@ -792,6 +891,15 @@ class AdaptadorYtdlpBase(AdaptadorBase):
                 "nome": "best_sem_thumbnail",
                 "formato": "best",
                 "thumbnail": False
+            },
+            {
+                # Alguns vídeos do TikTok não têm trilha de áudio nos formatos
+                # "limpos" (sem marca d'água), mesmo o yt-dlp listando
+                # "acodec: aac" para eles. O formato "download" (com marca
+                # d'água) é o único que garante áudio nesses casos.
+                "nome": "download_com_audio_sem_thumbnail",
+                "formato": "download/best",
+                "thumbnail": False
             }
         ]
 
@@ -818,6 +926,38 @@ class AdaptadorYtdlpBase(AdaptadorBase):
                     comando,
                     timeout_segundos=int(self.config["timeout_segundos"])
                 )
+
+                if resultado["ok"] and not playlist and arquivo_mp3 and not os.path.exists(arquivo_mp3):
+                    # O yt-dlp retornou sucesso, mas o .mp3 final não existe.
+                    # Caso mais comum: o ID já estava marcado no archive de
+                    # uma execução anterior que não chegou a gerar o
+                    # arquivo, então o yt-dlp só pulou o download. Remove a
+                    # marca e força uma nova tentativa real antes de desistir.
+                    saida_completa = resultado["stdout"] + "\n" + resultado["stderr"]
+                    match_archive = RE_JA_NO_ARCHIVE.search(saida_completa)
+
+                    if match_archive and remover_id_do_archive(match_archive.group(1)):
+                        log(
+                            f"♻️  [{indice}/{total}] Marcado como já baixado, "
+                            f"mas o arquivo não existe. Removendo do archive "
+                            f"e baixando de novo: {descricao}"
+                        )
+                        resultado = executar_comando(
+                            comando,
+                            timeout_segundos=int(self.config["timeout_segundos"])
+                        )
+
+                    if resultado["ok"] and not os.path.exists(arquivo_mp3):
+                        resultado = {
+                            "ok": False,
+                            "returncode": resultado["returncode"],
+                            "stdout": resultado["stdout"],
+                            "stderr": (
+                                resultado["stderr"]
+                                or "yt-dlp reportou sucesso, mas o arquivo final não foi gerado."
+                            ),
+                            "timeout": False
+                        }
 
                 if resultado["ok"]:
                     log(f"✅ [{indice}/{total}] Concluído: {descricao}")
@@ -1325,6 +1465,11 @@ def mostrar_dicas(resultados):
         log("\n💡 Atualize o yt-dlp:")
         log("   python -m pip install -U yt-dlp")
 
+    if any(f.get("categoria") == "arquivo_nao_gerado_apesar_de_sucesso_relatado" for f in falhas):
+        log("\n💡 O yt-dlp reportou sucesso, mas o .mp3 não foi gerado mesmo após")
+        log("   remover o item do archive e tentar de novo. Pode ser falha no")
+        log("   pós-processamento (ffmpeg/thumbnail). Rode o script de novo.")
+
 
 # ============================================================
 # PROGRAMA PRINCIPAL
@@ -1336,6 +1481,7 @@ def main():
 
     config = carregar_config()
     verificar_ferramentas_basicas()
+    carregar_mapa_nomes()
 
     os.makedirs(config["pasta_raiz"], exist_ok=True)
 
