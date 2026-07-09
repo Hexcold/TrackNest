@@ -1,0 +1,23 @@
+[
+  {
+    "plataforma": "youtube",
+    "tipo": "video",
+    "autor": "[NOME DO AUTOR]",
+    "titulo": "[NOME DA MUSICA]",
+    "url": "https://www.youtube.com/watch?v=ID_DO_VIDEO"
+  },
+  {
+    "plataforma": "tiktok",
+    "tipo": "video",
+    "autor": "[NOME DO AUTOR]",
+    "titulo": "[NOME DA MUSICA]",
+    "url": "https://vt.tiktok.com/EXEMPLO/"
+  },
+  {
+    "plataforma": "instagram",
+    "tipo": "video",
+    "autor": "[NOME DO AUTOR]",
+    "titulo": "[NOME DA MUSICA]",
+    "url": "https://www.instagram.com/reel/EXEMPLO/"
+  }
+]

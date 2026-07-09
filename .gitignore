@@ -217,7 +217,8 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
-# TrackNest - saída gerada pelo baixar_musicas.py
+# TrackNest - dados pessoais e saída gerada pelo baixar_musicas.py
+/musicas.json
 /Musicas/
 /baixados_archive.txt
 /nomes_arquivos.json

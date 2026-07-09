@@ -57,6 +57,7 @@ O suporte ao Spotify é apenas para leitura de metadados. O script não baixa á
 ```text
 tracknest/
 ├── baixar_musicas.py
+├── musicas.exemplo.json
 ├── musicas.json
 ├── config.json
 ├── Musicas/
@@ -66,12 +67,18 @@ tracknest/
 └── relatorio_falhas.txt
 ```
 
+`musicas.json`, `Musicas/`, `baixados_archive.txt`,
+`nomes_arquivos.json` e os relatórios de falha são pessoais/gerados
+pelo script e ficam fora do controle de versão (`.gitignore`). Só
+`musicas.exemplo.json` (o modelo) é versionado.
+
 ### Arquivos principais
 
 | Arquivo | Descrição |
 |---|---|
 | `baixar_musicas.py` | Script principal |
-| `musicas.json` | Lista de links para processar |
+| `musicas.exemplo.json` | Modelo versionado para criar seu `musicas.json` |
+| `musicas.json` | Lista de links para processar (pessoal, não versionado) |
 | `config.json` | Configurações opcionais |
 | `Musicas/` | Pasta onde os arquivos MP3 são salvos |
 | `baixados_archive.txt` | Histórico usado para evitar baixar o mesmo item novamente |
@@ -215,7 +222,15 @@ Exemplo completo:
 
 ## 📝 Formato do `musicas.json`
 
-O arquivo `musicas.json` deve conter uma lista de objetos.
+O `musicas.json` é o seu arquivo pessoal com os links a baixar, então
+ele **não é versionado** (está no `.gitignore`). Copie o modelo para
+começar:
+
+```bash
+cp musicas.exemplo.json musicas.json
+```
+
+O arquivo deve conter uma lista de objetos.
 
 Exemplo básico:
 
